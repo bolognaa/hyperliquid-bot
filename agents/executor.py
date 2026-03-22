@@ -7,6 +7,7 @@ from core.config import ASSETS, HL_PRIVATE_KEY, HL_TESTNET_URL, POSITION_MONITOR
 from core.logger import get_logger
 from core.notifier import notify_trade_opened, notify_trade_closed, notify_low_balance, notify_bot_stopped
 from core.state import BotState
+from agents.optimizer import OptimizerAgent
 
 logger = get_logger()
 
@@ -16,8 +17,9 @@ def _now() -> str:
 
 
 class ExecutorAgent:
-    def __init__(self, state: BotState):
+    def __init__(self, state: BotState, optimizer: OptimizerAgent):
         self.state = state
+        self.optimizer = optimizer
         self._hl_exchange = None
         self._hl_info = None
         self._paper_mode = True
@@ -191,6 +193,9 @@ class ExecutorAgent:
             logger.critical("Balance hit zero — stopping bot!")
             self.state.running = False
             await notify_bot_stopped("Balance reached $0. Bot halted.")
+
+        # Trigger optimizer check (only acts every N trades)
+        await self.optimizer.on_trade_closed()
 
     # ------------------------------------------------------------------
     # Main execution run (called each trading cycle)

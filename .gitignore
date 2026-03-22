@@ -9,3 +9,4 @@ state.json
 dist/
 build/
 .DS_Store
+.claude/

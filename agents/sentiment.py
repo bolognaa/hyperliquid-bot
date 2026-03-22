@@ -73,20 +73,40 @@ class SentimentAgent:
                 f"{OPENROUTER_BASE_URL}/chat/completions",
                 json=payload,
                 headers=headers,
-                timeout=aiohttp.ClientTimeout(total=30),
+                timeout=aiohttp.ClientTimeout(total=120),
             ) as resp:
                 http_status = resp.status
                 raw_text = await resp.text()
 
-            # Always log the raw response so we can see exactly what came back
-            logger.debug(f"OpenRouter raw response for {asset} (HTTP {http_status}): {raw_text}")
+            logger.info(f"OpenRouter response for {asset}: HTTP {http_status}, {len(raw_text)} bytes")
 
-            # Parse JSON
-            try:
-                data = json.loads(raw_text)
-            except json.JSONDecodeError:
-                logger.error(f"OpenRouter returned non-JSON for {asset} (HTTP {http_status}): {raw_text[:300]}")
-                return None
+            # Handle SSE streaming: MiniMax sends SSE even with stream:false
+            # SSE format has "data: {json}" lines — extract them
+            data = None
+            if raw_text.strip().startswith("data:") or "\ndata:" in raw_text:
+                last_json = None
+                for line in raw_text.split("\n"):
+                    line = line.strip()
+                    if line.startswith("data:"):
+                        chunk = line[5:].strip()
+                        if chunk == "[DONE]":
+                            continue
+                        try:
+                            last_json = json.loads(chunk)
+                        except json.JSONDecodeError:
+                            continue
+                if last_json:
+                    data = last_json
+                else:
+                    logger.error(f"OpenRouter SSE had no valid JSON for {asset}")
+                    return None
+            else:
+                # Normal JSON response
+                try:
+                    data = json.loads(raw_text)
+                except json.JSONDecodeError:
+                    logger.error(f"OpenRouter non-JSON for {asset}: {raw_text[:300]}")
+                    return None
 
             # Top-level API error
             if "error" in data:
