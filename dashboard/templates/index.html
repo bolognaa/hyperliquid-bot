@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hyperliquid Bot Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0d0d; color: #e0e0e0; font-family: 'Segoe UI', monospace; font-size: 13px; }
+  h1 { font-size: 20px; font-weight: 700; color: #fff; }
+  h2 { font-size: 14px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+  .header { background: #151515; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #222; }
+  .header .subtitle { color: #555; font-size: 11px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px 24px; }
+  .card { background: #181818; border: 1px solid #2a2a2a; border-radius: 8px; padding: 16px; }
+  .metric { font-size: 26px; font-weight: 700; }
+  .metric.green { color: #22c55e; }
+  .metric.red { color: #ef4444; }
+  .metric.white { color: #fff; }
+  .label { color: #666; font-size: 11px; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .section { padding: 0 24px 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: #555; font-size: 11px; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid #222; }
+  td { padding: 8px 10px; border-bottom: 1px solid #1a1a1a; vertical-align: top; }
+  tr:hover td { background: #1e1e1e; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .badge.long, .badge.buy, .badge.bullish { background: #14532d; color: #22c55e; }
+  .badge.short, .badge.sell, .badge.bearish { background: #450a0a; color: #ef4444; }
+  .badge.hold, .badge.neutral { background: #1c1917; color: #78716c; }
+  .badge.ok { background: #14532d; color: #22c55e; }
+  .badge.error { background: #450a0a; color: #ef4444; }
+  .badge.init, .badge.partial { background: #1e1b4b; color: #818cf8; }
+  .badge.kept { background: #14532d; color: #22c55e; }
+  .badge.reverted { background: #450a0a; color: #ef4444; }
+  .badge.pending { background: #422006; color: #f59e0b; }
+  .pnl.pos { color: #22c55e; }
+  .pnl.neg { color: #ef4444; }
+  .reasoning { color: #777; font-size: 11px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .agent-card { background: #181818; border: 1px solid #2a2a2a; border-radius: 6px; padding: 10px 14px; }
+  .agent-name { font-weight: 600; color: #ccc; margin-bottom: 4px; }
+  .agent-msg { color: #666; font-size: 11px; margin-top: 2px; }
+  .refresh-bar { background: #111; padding: 6px 24px; color: #444; font-size: 11px; display: flex; justify-content: space-between; }
+  .no-data { color: #444; font-style: italic; padding: 12px 10px; }
+  .divider { border-top: 1px solid #222; margin: 0 24px 16px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ Hyperliquid Bot</h1>
+    <div class="subtitle">Multi-Agent Testnet Trader • Paper Trading</div>
+  </div>
+  <div id="clock" style="color:#444;font-size:12px;"></div>
+</div>
+
+<div id="dashboard">
+  <!-- Balance Cards -->
+  <div class="grid" id="balance-grid">
+    {% set pnl = state.total_pnl %}
+    {% set pct = (pnl / state.starting_balance * 100) if state.starting_balance else 0 %}
+    <div class="card">
+      <div class="metric white">${{ "%.2f"|format(state.balance) }}</div>
+      <div class="label">Current Balance</div>
+    </div>
+    <div class="card">
+      <div class="metric {% if pnl >= 0 %}green{% else %}red{% endif %}">
+        {% if pnl >= 0 %}+{% endif %}${{ "%.2f"|format(pnl) }} ({{ "%+.1f"|format(pct) }}%)
+      </div>
+      <div class="label">Total P&L</div>
+    </div>
+    <div class="card">
+      <div class="metric white">{{ state.positions|length }}</div>
+      <div class="label">Open Positions</div>
+    </div>
+    <div class="card">
+      <div class="metric white">{{ state.trades|length }}</div>
+      <div class="label">Total Trades</div>
+    </div>
+  </div>
+
+  <!-- Open Positions -->
+  <div class="section">
+    <h2>Open Positions</h2>
+    {% if state.positions %}
+    <table>
+      <thead><tr>
+        <th>Asset</th><th>Direction</th><th>Size</th><th>Entry</th>
+        <th>Current</th><th>Leverage</th><th>Margin</th><th>SL</th><th>TP</th><th>Opened</th>
+      </tr></thead>
+      <tbody>
+      {% for asset, pos in state.positions.items() %}
+        {% set cur = state.indicators.get(asset, {}).get('price', 0) %}
+        {% if cur and pos.entry_price %}
+          {% if pos.direction == 'long' %}
+            {% set unreal = (cur - pos.entry_price) * pos.size %}
+          {% else %}
+            {% set unreal = (pos.entry_price - cur) * pos.size %}
+          {% endif %}
+        {% else %}
+          {% set unreal = 0 %}
+        {% endif %}
+        <tr>
+          <td><strong>{{ asset }}</strong></td>
+          <td><span class="badge {{ pos.direction }}">{{ pos.direction|upper }}</span></td>
+          <td>{{ "%.5f"|format(pos.size) }}</td>
+          <td>${{ "%.2f"|format(pos.entry_price) }}</td>
+          <td>${{ "%.2f"|format(cur) }}</td>
+          <td>{{ pos.leverage }}x</td>
+          <td>${{ "%.2f"|format(pos.margin) }}</td>
+          <td>${{ "%.2f"|format(pos.stop_loss) }}</td>
+          <td>${{ "%.2f"|format(pos.take_profit) }}</td>
+          <td style="color:#555;font-size:11px;">{{ pos.opened_at[:16] if pos.opened_at else '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="no-data">No open positions.</div>
+    {% endif %}
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Recent Trades -->
+  <div class="section">
+    <h2>Recent Trades (last 20)</h2>
+    {% set recent = state.trades[-20:]|reverse|list %}
+    {% if recent %}
+    <table>
+      <thead><tr>
+        <th>Asset</th><th>Dir</th><th>Entry</th><th>Exit</th>
+        <th>P&L</th><th>Leverage</th><th>Reason</th><th>Closed</th><th>Reasoning</th>
+      </tr></thead>
+      <tbody>
+      {% for t in recent %}
+        <tr>
+          <td><strong>{{ t.asset }}</strong></td>
+          <td><span class="badge {{ t.direction }}">{{ t.direction|upper }}</span></td>
+          <td>${{ "%.2f"|format(t.entry_price) }}</td>
+          <td>${{ "%.2f"|format(t.exit_price) }}</td>
+          <td class="pnl {% if t.pnl >= 0 %}pos{% else %}neg{% endif %}">
+            {% if t.pnl >= 0 %}+{% endif %}${{ "%.3f"|format(t.pnl) }}
+          </td>
+          <td>{{ t.leverage }}x</td>
+          <td><span class="badge {{ t.reason }}">{{ t.reason }}</span></td>
+          <td style="color:#555;font-size:11px;">{{ t.closed_at[:16] if t.closed_at else '-' }}</td>
+          <td class="reasoning" title="{{ t.reasoning }}">{{ t.reasoning[:80] if t.reasoning else '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="no-data">No trades yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Market Data -->
+  <div class="section">
+    <h2>Market Indicators</h2>
+    <table>
+      <thead><tr>
+        <th>Asset</th><th>Price</th><th>24h %</th><th>RSI</th>
+        <th>EMA9</th><th>EMA21</th><th>MACD Hist</th><th>BB Position</th><th>ATR</th><th>AI Sentiment</th>
+      </tr></thead>
+      <tbody>
+      {% for asset in ['BTC', 'ETH', 'SOL'] %}
+        {% set ind = state.indicators.get(asset, {}) %}
+        {% set sent = state.sentiment.get(asset, {}) %}
+        {% if ind %}
+          {% set rsi = ind.get('rsi', 0) %}
+          {% set price = ind.get('price', 0) %}
+          {% set bb_u = ind.get('bb_upper', 1) %}
+          {% set bb_l = ind.get('bb_lower', 0) %}
+          {% set bb_m = ind.get('bb_mid', 0) %}
+          {% if bb_u != bb_l %}
+            {% set bb_pos = ((price - bb_l) / (bb_u - bb_l) * 100) %}
+          {% else %}
+            {% set bb_pos = 50 %}
+          {% endif %}
+          <tr>
+            <td><strong>{{ asset }}</strong></td>
+            <td>${{ "{:,.2f}".format(price) }}</td>
+            <td class="pnl {% if ind.get('price_change_pct', 0) >= 0 %}pos{% else %}neg{% endif %}">
+              {{ "%+.2f"|format(ind.get('price_change_pct', 0)) }}%
+            </td>
+            <td style="color: {% if rsi < 30 %}#22c55e{% elif rsi > 70 %}#ef4444{% else %}#e0e0e0{% endif %}">
+              {{ "%.1f"|format(rsi) }}
+            </td>
+            <td>${{ "{:,.2f}".format(ind.get('ema_fast', 0)) }}</td>
+            <td>${{ "{:,.2f}".format(ind.get('ema_slow', 0)) }}</td>
+            <td class="pnl {% if ind.get('macd_hist', 0) >= 0 %}pos{% else %}neg{% endif %}">
+              {{ "%.4f"|format(ind.get('macd_hist', 0)) }}
+            </td>
+            <td style="color:#aaa;">{{ "%.0f"|format(bb_pos) }}%</td>
+            <td>${{ "{:,.2f}".format(ind.get('atr', 0)) }}</td>
+            <td>
+              {% if sent %}
+                <span class="badge {{ sent.get('direction', 'neutral') }}">
+                  {{ sent.get('direction', 'neutral') }} {{ "%.0f"|format(sent.get('confidence', 0)*100) }}%
+                </span>
+              {% else %}-{% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td>{{ asset }}</td><td colspan="9" class="no-data">Waiting for data...</td></tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Agent Status -->
+  <div class="section">
+    <h2>Agent Status</h2>
+    <div class="agent-grid">
+      {% for name, info in state.agent_status.items() %}
+      <div class="agent-card">
+        <div class="agent-name">
+          <span class="badge {{ info.status }}">{{ info.status }}</span>
+          {{ name|replace('_', ' ')|title }}
+        </div>
+        <div class="agent-msg">{{ info.message or '—' }}</div>
+        <div style="color:#333;font-size:10px;margin-top:4px;">
+          {{ info.last_run[:19] if info.last_run else 'Never' }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Optimizer History -->
+  <div class="section">
+    <h2>Optimizer History</h2>
+    {% set opt_hist = state.optimizer_history[-10:]|reverse|list %}
+    {% if opt_hist %}
+    <table>
+      <thead><tr>
+        <th>Time</th><th>Parameter</th><th>Old Value</th><th>New Value</th>
+        <th>Baseline Score</th><th>Result Score</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+      {% for entry in opt_hist %}
+        {% set bm = entry.get('baseline_metrics', {}) %}
+        {% set rm = entry.get('result_metrics', {}) %}
+        <tr>
+          <td style="color:#555;font-size:11px;">{{ entry.timestamp[:16] if entry.timestamp else '-' }}</td>
+          <td><code>{{ entry.parameter }}</code></td>
+          <td>{{ entry.old_value }}</td>
+          <td>{{ entry.new_value }}</td>
+          <td>wr={{ "%.0f"|format(bm.get('win_rate',0)*100) }}% avg=${{ "%.3f"|format(bm.get('avg_pnl',0)) }}</td>
+          <td>
+            {% if rm %}
+              wr={{ "%.0f"|format(rm.get('win_rate',0)*100) }}% avg=${{ "%.3f"|format(rm.get('avg_pnl',0)) }}
+            {% else %}<span style="color:#444">Pending ({{ state.trades_since_last_optimization }}/{{ 10 }} trades)</span>{% endif %}
+          </td>
+          <td><span class="badge {{ entry.status }}">{{ entry.status }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="no-data">No optimizer history yet. Runs after every {{ 10 }} completed trades.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="refresh-bar">
+  <span>Auto-refreshing every 10s</span>
+  <span id="last-refresh"></span>
+</div>
+
+<script>
+  function updateClock() {
+    document.getElementById('clock').textContent = new Date().toUTCString();
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  async function refresh() {
+    try {
+      const resp = await fetch('/api/state');
+      if (!resp.ok) return;
+      document.getElementById('last-refresh').textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+      // Full page reload for simplicity
+      location.reload();
+    } catch(e) {}
+  }
+  setTimeout(refresh, 10000);
+  setInterval(refresh, 10000);
+  document.getElementById('last-refresh').textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+</script>
+
+</body>
+</html>

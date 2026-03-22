@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+logs/
+.chat_id
+state.json
+*.egg-info/
+dist/
+build/
+.DS_Store
