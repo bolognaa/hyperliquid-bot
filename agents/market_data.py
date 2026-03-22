@@ -174,6 +174,21 @@ class MarketDataAgent:
         status = "ok" if success_count == len(KRAKEN_PAIRS) else "partial"
         await self.state.update_agent_status("market_data", status, f"{success_count}/{len(KRAKEN_PAIRS)} assets updated")
 
+    async def run_price_ticker(self):
+        """Fast loop: update just the live price every 10s for accurate SL/TP monitoring."""
+        import asyncio
+        logger.info("MarketDataAgent: fast price ticker started (10s interval).")
+        while self.state.running:
+            await asyncio.sleep(10)
+            for asset, pair in KRAKEN_PAIRS.items():
+                price = await self._fetch_ticker(pair)
+                if price is None:
+                    continue
+                # Patch only the price field — leave all indicators intact
+                async with self.state._lock:
+                    if self.state.indicators.get(asset):
+                        self.state.indicators[asset]["price"] = price
+
     async def close(self):
         if self._session and not self._session.closed:
             await self._session.close()

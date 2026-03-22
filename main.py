@@ -101,6 +101,7 @@ async def main():
             trading_loop(state, market_data, sentiment, strategy, risk_manager, executor),
             name="trading-loop",
         ),
+        asyncio.create_task(market_data.run_price_ticker(), name="price-ticker"),
         asyncio.create_task(executor.monitor_positions(), name="position-monitor"),
         asyncio.create_task(state.auto_save(), name="state-autosave"),
         asyncio.create_task(run_dashboard(state), name="dashboard"),
