@@ -163,7 +163,7 @@ class SentimentAgent:
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"SentimentAgent JSON parse error for {asset}: {e} — content was: {content!r[:300]}")
+            logger.error(f"SentimentAgent JSON parse error for {asset}: {e} — content was: {repr(content)[:300]}")
             return None
         except Exception as e:
             logger.error(f"SentimentAgent query failed for {asset}: {e} — skipping (no retry)", exc_info=True)
