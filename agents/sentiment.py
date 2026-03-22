@@ -10,31 +10,11 @@ from core.state import BotState
 
 logger = get_logger()
 
-_SYSTEM_PROMPT = (
-    "You are a professional crypto trading analyst. Analyze market data and provide "
-    "a directional bias. Always respond with valid JSON only — no extra text."
-)
+_SYSTEM_PROMPT = "Crypto analyst. Reply with JSON only, no other text."
 
-_USER_TEMPLATE = """Analyze the following market data for {asset}/USD and provide a directional bias.
-
-Current Price: ${price:,.2f}
-24h Change: {price_change_pct:+.2f}%
-
-Indicators:
-- RSI(14): {rsi:.1f}
-- EMA(9): ${ema_fast:,.2f}  EMA(21): ${ema_slow:,.2f}
-- MACD Line: {macd_line:.4f}  Signal: {signal_line:.4f}  Histogram: {macd_hist:.4f}
-- Bollinger Upper: ${bb_upper:,.2f}  Mid: ${bb_mid:,.2f}  Lower: ${bb_lower:,.2f}
-- ATR(14): ${atr:,.2f}
-
-Recent closing prices (oldest→newest): {recent_closes}
-
-Respond ONLY with this exact JSON structure:
-{{
-  "direction": "bullish" | "bearish" | "neutral",
-  "confidence": 0.0-1.0,
-  "reasoning": "2-3 sentences explaining your analysis"
-}}"""
+_USER_TEMPLATE = """{asset}/USD ${price:,.2f} ({price_change_pct:+.2f}%)
+RSI={rsi:.1f} EMA9={ema_fast:.2f} EMA21={ema_slow:.2f} MACD={macd_hist:.4f} BB%={bb_pct:.0f} ATR={atr:.2f}
+Reply: {{"direction":"bullish/bearish/neutral","confidence":0.0-1.0,"reasoning":"why"}}"""
 
 
 class SentimentAgent:
@@ -52,21 +32,22 @@ class SentimentAgent:
             logger.warning("SentimentAgent: OPENROUTER_API_KEY not set, using neutral sentiment.")
             return {"direction": "neutral", "confidence": 0.5, "reasoning": "AI not configured."}
 
+        bb_upper = indicators.get("bb_upper", 1)
+        bb_lower = indicators.get("bb_lower", 0)
+        price = indicators.get("price", 0)
+        bb_range = bb_upper - bb_lower if bb_upper != bb_lower else 1
+        bb_pct = ((price - bb_lower) / bb_range) * 100
+
         prompt = _USER_TEMPLATE.format(
             asset=asset,
-            price=indicators.get("price", 0),
+            price=price,
             price_change_pct=indicators.get("price_change_pct", 0),
             rsi=indicators.get("rsi", 50),
             ema_fast=indicators.get("ema_fast", 0),
             ema_slow=indicators.get("ema_slow", 0),
-            macd_line=indicators.get("macd_line", 0),
-            signal_line=indicators.get("signal_line", 0),
             macd_hist=indicators.get("macd_hist", 0),
-            bb_upper=indicators.get("bb_upper", 0),
-            bb_mid=indicators.get("bb_mid", 0),
-            bb_lower=indicators.get("bb_lower", 0),
+            bb_pct=bb_pct,
             atr=indicators.get("atr", 0),
-            recent_closes=indicators.get("recent_closes", []),
         )
 
         payload = {
@@ -76,7 +57,8 @@ class SentimentAgent:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.3,
-            "max_tokens": 300,
+            "max_tokens": 2000,
+            "stream": False,
         }
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
