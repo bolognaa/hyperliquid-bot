@@ -95,11 +95,32 @@ class SentimentAgent:
             ) as resp:
                 data = await resp.json()
 
+            # Top-level API error (e.g. 401, rate limit, bad model)
             if "error" in data:
-                logger.error(f"OpenRouter error for {asset}: {data['error']}")
+                logger.error(f"OpenRouter API error for {asset}: {data['error']} — skipping (no retry)")
                 return None
 
-            content = data["choices"][0]["message"]["content"].strip()
+            # Guard against missing/malformed choices
+            choices = data.get("choices")
+            if not choices or not isinstance(choices, list):
+                logger.error(f"OpenRouter returned no choices for {asset}: {data}")
+                return None
+
+            message = choices[0].get("message", {})
+            content = message.get("content")
+
+            if content is None:
+                finish_reason = choices[0].get("finish_reason", "unknown")
+                logger.error(
+                    f"OpenRouter returned null content for {asset} "
+                    f"(finish_reason={finish_reason}) — skipping (no retry)"
+                )
+                return None
+
+            content = content.strip()
+            if not content:
+                logger.error(f"OpenRouter returned empty content for {asset} — skipping (no retry)")
+                return None
 
             # Strip markdown code blocks if present
             if content.startswith("```"):
@@ -119,10 +140,10 @@ class SentimentAgent:
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"SentimentAgent JSON parse error for {asset}: {e}")
+            logger.error(f"SentimentAgent JSON parse error for {asset}: {e} — skipping (no retry)")
             return None
         except Exception as e:
-            logger.error(f"SentimentAgent AI query failed for {asset}: {e}")
+            logger.error(f"SentimentAgent query failed for {asset}: {e} — skipping (no retry)")
             return None
 
     async def run(self):
