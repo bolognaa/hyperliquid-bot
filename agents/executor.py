@@ -213,9 +213,19 @@ class ExecutorAgent:
             if direction == "hold" or "approved_at" not in signal:
                 continue
 
-            # Don't re-open if already in a position for this asset
+            # If existing position is opposite direction, close it first
             if asset in self.state.positions:
-                continue
+                existing = self.state.positions[asset]
+                existing_dir = existing["direction"]
+                new_dir = "long" if direction == "buy" else "short"
+                if existing_dir != new_dir:
+                    indicators = self.state.indicators.get(asset, {})
+                    current_price = indicators.get("price")
+                    if current_price:
+                        logger.info(f"Closing {existing_dir} {asset} to flip to {new_dir}")
+                        await self._close_position(asset, current_price, "signal_flip")
+                else:
+                    continue  # same direction, skip
 
             await self._open_position(signal)
             executed += 1
