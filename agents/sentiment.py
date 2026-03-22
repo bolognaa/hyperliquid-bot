@@ -93,45 +93,68 @@ class SentimentAgent:
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
-                data = await resp.json()
+                http_status = resp.status
+                raw_text = await resp.text()
 
-            # Top-level API error (e.g. 401, rate limit, bad model)
+            # Always log the raw response so we can see exactly what came back
+            logger.debug(f"OpenRouter raw response for {asset} (HTTP {http_status}): {raw_text}")
+
+            # Parse JSON
+            try:
+                data = json.loads(raw_text)
+            except json.JSONDecodeError:
+                logger.error(f"OpenRouter returned non-JSON for {asset} (HTTP {http_status}): {raw_text[:300]}")
+                return None
+
+            # Top-level API error
             if "error" in data:
                 logger.error(f"OpenRouter API error for {asset}: {data['error']} — skipping (no retry)")
                 return None
 
             # Guard against missing/malformed choices
             choices = data.get("choices")
-            if not choices or not isinstance(choices, list):
-                logger.error(f"OpenRouter returned no choices for {asset}: {data}")
+            if not choices or not isinstance(choices, list) or len(choices) == 0:
+                logger.error(f"OpenRouter no choices for {asset}. Full response: {raw_text[:500]}")
                 return None
 
-            message = choices[0].get("message", {})
-            content = message.get("content")
+            choice = choices[0]
+            # Some models put content directly in choice, others nest under message
+            message = choice.get("message") or choice.get("delta") or {}
+            content = message.get("content") if isinstance(message, dict) else None
+
+            # Fallback: some models put text at choice level
+            if content is None:
+                content = choice.get("text") or choice.get("content")
+
+            finish_reason = choice.get("finish_reason", "unknown")
 
             if content is None:
-                finish_reason = choices[0].get("finish_reason", "unknown")
                 logger.error(
-                    f"OpenRouter returned null content for {asset} "
-                    f"(finish_reason={finish_reason}) — skipping (no retry)"
+                    f"OpenRouter null content for {asset} "
+                    f"(finish_reason={finish_reason}). Full response: {raw_text[:500]}"
                 )
                 return None
 
-            content = content.strip()
+            content = str(content).strip()
             if not content:
-                logger.error(f"OpenRouter returned empty content for {asset} — skipping (no retry)")
+                logger.error(f"OpenRouter empty content for {asset} (finish_reason={finish_reason})")
                 return None
 
-            # Strip markdown code blocks if present
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
+            # Strip markdown code fences if present
+            if "```" in content:
+                parts = content.split("```")
+                # Take the first non-empty block after a fence
+                for part in parts[1::2]:
+                    part = part.strip()
+                    if part.startswith("json"):
+                        part = part[4:].strip()
+                    if part:
+                        content = part
+                        break
 
             result = json.loads(content)
 
-            # Validate
+            # Validate and normalise
             if result.get("direction") not in ("bullish", "bearish", "neutral"):
                 result["direction"] = "neutral"
             result["confidence"] = max(0.0, min(1.0, float(result.get("confidence", 0.5))))
@@ -140,10 +163,10 @@ class SentimentAgent:
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"SentimentAgent JSON parse error for {asset}: {e} — skipping (no retry)")
+            logger.error(f"SentimentAgent JSON parse error for {asset}: {e} — content was: {content!r[:300]}")
             return None
         except Exception as e:
-            logger.error(f"SentimentAgent query failed for {asset}: {e} — skipping (no retry)")
+            logger.error(f"SentimentAgent query failed for {asset}: {e} — skipping (no retry)", exc_info=True)
             return None
 
     async def run(self):
